@@ -24,8 +24,8 @@ export class HandTracker {
     this.hands.setOptions({
       maxNumHands: 1,
       modelComplexity: 1,  // Better accuracy model (less jitter)
-      minDetectionConfidence: 0.6,
-      minTrackingConfidence: 0.5
+      minDetectionConfidence: 0.5,  // Reduced from 0.6 for faster detection (still accurate)
+      minTrackingConfidence: 0.5    // Keep consistent for smooth tracking
     });
 
     this.hands.onResults((results) => this.onResults(results));

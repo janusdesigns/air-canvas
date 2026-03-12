@@ -1,17 +1,14 @@
 import { Point2D, Stroke } from './types';
 import { STROKE, GESTURE } from './constants';
 
-// Jitter filter threshold - ignore movements smaller than this
-const JITTER_THRESHOLD = 3;
-
 export class DrawingCanvas {
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
   private currentStroke: Stroke | null = null;
   private completedStrokes: Stroke[] = [];
   private livePosition: Point2D | null = null;
-  private filteredPosition: Point2D | null = null;  // Position after jitter filter
-  private recentPoints: Point2D[] = [];  // Buffer for smoothing
+  private recentPoints: Point2D[] = [];  // Buffer for smoothing - minimal for instant response
+  private strokeStartTime: number = 0;  // Time when stroke started
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -40,85 +37,60 @@ export class DrawingCanvas {
       closed: false
     };
     this.livePosition = point;
-    this.filteredPosition = point;
     this.recentPoints = [point];
+    this.strokeStartTime = performance.now();
   }
 
   addPoint(point: Point2D): void {
     if (!this.currentStroke) return;
 
-    // Apply jitter filter - ignore tiny movements
-    const filtered = this.applyJitterFilter(point);
+    // For first 100ms of stroke, use raw position with NO smoothing
+    const timeSinceStart = performance.now() - this.strokeStartTime;
+    const useRawPosition = timeSinceStart < 100;
 
-    // Add filtered point to buffer
-    this.recentPoints.push(filtered);
-    if (this.recentPoints.length > 10) {
-      this.recentPoints.shift();
+    let positionToUse: Point2D;
+    if (useRawPosition) {
+      // First 100ms: use raw position for zero latency
+      positionToUse = point;
+    } else {
+      // After 100ms: apply light smoothing for stability
+      this.recentPoints.push(point);
+      if (this.recentPoints.length > 2) {
+        this.recentPoints.shift();
+      }
+      positionToUse = this.recentPoints.length === 1 
+        ? this.recentPoints[0]
+        : this.getSmoothedPosition();
     }
 
-    // Use strong smoothing
-    const smoothed = this.getSmoothedPosition();
-    this.livePosition = smoothed;
+    this.livePosition = positionToUse;
 
     const lastPoint = this.currentStroke.points[this.currentStroke.points.length - 1];
-    const dist = this.distance(smoothed, lastPoint);
+    const dist = this.distance(positionToUse, lastPoint);
 
     // Only add points that are far enough apart
-    if (dist >= STROKE.MIN_POINT_DISTANCE) {
-      this.currentStroke.points.push(smoothed);
+    if (dist >= 1.5) {  // Minimal distance threshold
+      this.currentStroke.points.push(positionToUse);
     }
   }
 
-  // Filter out jitter - only update if movement is significant
-  private applyJitterFilter(point: Point2D): Point2D {
-    if (!this.filteredPosition) {
-      this.filteredPosition = point;
-      return point;
-    }
-
-    const dist = this.distance(point, this.filteredPosition);
-
-    // If movement is below threshold, ignore it (return last position)
-    if (dist < JITTER_THRESHOLD) {
-      return this.filteredPosition;
-    }
-
-    // Movement is significant - update filtered position
-    this.filteredPosition = point;
-    return point;
-  }
-
-  // Strong smoothing using simple moving average
+  // Minimal smoothing - just return most recent point for zero latency
   private getSmoothedPosition(): Point2D {
     if (this.recentPoints.length === 0) {
       return { x: 0, y: 0 };
     }
-
-    // Simple average of all points in buffer
-    let sumX = 0, sumY = 0;
-    for (const p of this.recentPoints) {
-      sumX += p.x;
-      sumY += p.y;
-    }
-    return {
-      x: sumX / this.recentPoints.length,
-      y: sumY / this.recentPoints.length
-    };
+    // Return most recent point for instant feedback
+    return this.recentPoints[this.recentPoints.length - 1];
   }
 
   // Update live position without adding a point (for real-time tracking)
   updateLivePosition(point: Point2D): void {
-    const filtered = this.applyJitterFilter(point);
-    this.recentPoints.push(filtered);
-    if (this.recentPoints.length > 10) {
-      this.recentPoints.shift();
-    }
-    this.livePosition = this.getSmoothedPosition();
+    // Use raw position for live preview feedback (no filtering)
+    this.livePosition = point;
   }
 
   clearLivePosition(): void {
     this.livePosition = null;
-    this.filteredPosition = null;
     this.recentPoints = [];
   }
 

@@ -529,7 +529,7 @@ class AirCanvas {
     if (!this.handDetected && wasDetected) {
       this.showStatus('Show your hand to begin');
     } else if (this.handDetected && !wasDetected) {
-      this.hideStatus();
+      this.showStatus('Point to Draw');  // Show "Point to Draw" when hand is detected
     }
 
     // Render hand tracking on preview canvas

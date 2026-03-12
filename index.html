@@ -1,1038 +1,1126 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Air Canvas - Gesture Drawing</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;1,400;1,500&family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
-  <!-- Preload MediaPipe models for faster hand tracking initialization -->
-  <link rel="preconnect" href="https://cdn.jsdelivr.net">
-  <link rel="prefetch" href="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.binarypb" as="fetch" crossorigin>
-  <link rel="prefetch" href="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands_solution_packed_assets_loader.js" as="script" crossorigin>
-  <link rel="prefetch" href="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands_solution_simd_wasm_bin.js" as="script" crossorigin>
-  <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-
-    html, body {
-      width: 100%;
-      height: 100%;
-      overflow: hidden;
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-      background: #0a0f0a;
-    }
-
-    #app {
-      width: 100%;
-      height: 100%;
-      position: relative;
-      background: radial-gradient(ellipse at 50% 50%, #1a2a1a 0%, #0d120d 50%, #080a08 100%);
-    }
-
-    /* Content wrapper with max-width */
-    .content-wrapper {
-      max-width: 1980px;
-      width: 100%;
-      height: 100%;
-      margin: 0 auto;
-      position: relative;
-    }
-
-    /* Video element for webcam - now visible in preview */
-    #webcam {
-      display: none;
-    }
-
-    /* Camera preview - draggable */
-    #camera-preview {
-      position: absolute;
-      top: 24px;
-      left: 50%;
-      transform: translateX(-50%);
-      width: 320px;
-      height: 240px;
-      border-radius: 12px;
-      overflow: hidden;
-      border: 2px solid rgba(190, 225, 125, 0.3);
-      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
-      z-index: 10;
-      background: #000;
-      cursor: grab;
-      user-select: none;
-    }
-
-    #camera-preview.dragging {
-      cursor: grabbing;
-      opacity: 0.9;
-      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.7);
-      transition: none;
-    }
-
-    #camera-preview:not(.dragging) {
-      transition: box-shadow 0.2s ease, opacity 0.2s ease;
-    }
-
-    #camera-preview.custom-position {
-      transform: none;
-    }
-
-    #camera-preview.expanded {
-      width: 640px;
-      height: 480px;
-    }
-
-    #camera-preview video {
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-      transform: scaleX(-1);
-    }
-
-    #camera-preview canvas {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      pointer-events: none;
-    }
-
-    .preview-expand-btn {
-      position: absolute;
-      top: 8px;
-      right: 8px;
-      width: 28px;
-      height: 28px;
-      background: rgba(0, 0, 0, 0.6);
-      border: 1px solid rgba(190, 225, 125, 0.4);
-      border-radius: 6px;
-      color: #bee17d;
-      font-size: 14px;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: all 0.2s ease;
-      z-index: 11;
-    }
-
-    .preview-expand-btn:hover {
-      background: rgba(190, 225, 125, 0.2);
-      border-color: rgba(190, 225, 125, 0.6);
-    }
-
-    #camera-preview.expanded .preview-expand-btn {
-      transform: rotate(180deg);
-    }
-
-    /* 3D scene layer */
-    #scene-canvas {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      z-index: 1;
-    }
-
-    /* Drawing canvas layer */
-    #draw-canvas {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      z-index: 2;
-      pointer-events: none;
-    }
-
-    /* Hand visualization layer */
-    #hand-canvas {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      z-index: 3;
-      pointer-events: none;
-    }
-
-    /* UI overlay */
-    #ui-overlay {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      z-index: 4;
-      pointer-events: none;
-    }
-
-    #ui-overlay > * {
-      pointer-events: auto;
-    }
-
-    /* Title section */
-    .title-section {
-      position: absolute;
-      top: 24px;
-      left: 24px;
-      z-index: 11;
-    }
-
-    .title-text {
-      color: #bee17d;
-      font-family: 'Cormorant Garamond', serif;
-      font-size: 32px;
-      font-weight: 400;
-      font-style: normal;
-      letter-spacing: -0.01em;
-      margin-bottom: 4px;
-    }
-
-    .subtitle-text {
-      color: rgba(190, 225, 125, 0.6);
-      font-family: 'Inter', sans-serif;
-      font-size: 12px;
-      font-weight: 300;
-      letter-spacing: 0.05em;
-    }
-
-    .subtitle-text a {
-      color: rgba(190, 225, 125, 0.8);
-      text-decoration: none;
-      transition: color 0.2s ease;
-    }
-
-    .subtitle-text a:hover {
-      color: #bee17d;
-      text-decoration: underline;
-    }
-
-    /* Action buttons (top right) */
-    .action-buttons {
-      position: absolute;
-      top: 24px;
-      right: 24px;
-      display: flex;
-      gap: 12px;
-      z-index: 11;
-    }
-
-    .action-btn {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 10px 16px;
-      background: rgba(20, 30, 20, 0.8);
-      border: 1px solid rgba(190, 225, 125, 0.3);
-      border-radius: 25px;
-      color: #bee17d;
-      font-family: 'Inter', sans-serif;
-      font-size: 13px;
-      font-weight: 400;
-      cursor: pointer;
-      transition: all 0.2s ease;
-      backdrop-filter: blur(10px);
-    }
-
-    .action-btn:hover {
-      background: rgba(190, 225, 125, 0.15);
-      border-color: rgba(190, 225, 125, 0.5);
-      transform: translateY(-2px);
-    }
-
-    .action-btn:active {
-      transform: translateY(0);
-    }
-
-    .action-btn .icon {
-      font-size: 16px;
-    }
-
-    /* Color palette */
-    #color-palette {
-      position: absolute;
-      top: 50%;
-      right: 24px;
-      transform: translateY(-50%);
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-      padding: 14px 10px;
-      background: rgba(20, 30, 20, 0.8);
-      border-radius: 30px;
-      border: 1px solid rgba(190, 225, 125, 0.2);
-      backdrop-filter: blur(10px);
-    }
-
-    .color-swatch {
-      width: 32px;
-      height: 32px;
-      border-radius: 50%;
-      cursor: pointer;
-      border: 2px solid transparent;
-      transition: all 0.2s ease;
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-    }
-
-    .color-swatch:hover {
-      transform: scale(1.15);
-    }
-
-    .color-swatch.active {
-      border-color: #bee17d;
-      box-shadow: 0 0 15px rgba(190, 225, 125, 0.5);
-    }
-
-    /* Gesture hints */
-    .gesture-hints {
-      position: absolute;
-      bottom: 24px;
-      left: 24px;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      opacity: 0.8;
-    }
-
-    .gesture-hint {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      color: rgba(190, 225, 125, 0.8);
-      font-size: 12px;
-      font-weight: 300;
-      letter-spacing: 0.03em;
-    }
-
-    .gesture-icon {
-      width: 26px;
-      height: 26px;
-      background: rgba(190, 225, 125, 0.1);
-      border: 1px solid rgba(190, 225, 125, 0.3);
-      border-radius: 6px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 13px;
-    }
-
-    /* Status message */
-    #status-message {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      color: #bee17d;
-      font-family: 'Cormorant Garamond', serif;
-      font-size: 28px;
-      font-style: italic;
-      text-align: center;
-      opacity: 0;
-      transition: opacity 0.3s ease;
-      text-shadow: 0 0 30px rgba(190, 225, 125, 0.3);
-    }
-
-    #status-message.visible {
-      opacity: 1;
-    }
-
-    /* Controls info */
-    .controls-info {
-      position: absolute;
-      bottom: 24px;
-      right: 24px;
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-      text-align: right;
-      color: rgba(190, 225, 125, 0.5);
-      font-size: 11px;
-      font-weight: 300;
-      letter-spacing: 0.05em;
-    }
-
-    /* Invite Modal */
-    .modal-overlay {
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background: rgba(0, 0, 0, 0.7);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      z-index: 200;
-      opacity: 0;
-      visibility: hidden;
-      transition: all 0.3s ease;
-      backdrop-filter: blur(5px);
-    }
-
-    .modal-overlay.visible {
-      opacity: 1;
-      visibility: visible;
-    }
-
-    .modal {
-      background: linear-gradient(145deg, #1a2a1a 0%, #0d120d 100%);
-      border: 1px solid rgba(190, 225, 125, 0.3);
-      border-radius: 20px;
-      padding: 32px;
-      max-width: 400px;
-      width: 90%;
-      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-      transform: scale(0.9);
-      transition: transform 0.3s ease;
-    }
-
-    .modal-overlay.visible .modal {
-      transform: scale(1);
-    }
-
-    .modal-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 24px;
-    }
-
-    .modal-title {
-      color: #bee17d;
-      font-family: 'Cormorant Garamond', serif;
-      font-size: 28px;
-      font-weight: 400;
-    }
-
-    .modal-close {
-      width: 32px;
-      height: 32px;
-      border: none;
-      background: rgba(190, 225, 125, 0.1);
-      border-radius: 50%;
-      color: #bee17d;
-      font-size: 20px;
-      cursor: pointer;
-      transition: all 0.2s ease;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .modal-close:hover {
-      background: rgba(190, 225, 125, 0.2);
-    }
-
-    .modal-body {
-      color: rgba(190, 225, 125, 0.8);
-      font-size: 14px;
-      line-height: 1.6;
-    }
-
-    .room-code-section {
-      margin: 20px 0;
-    }
-
-    .room-code-label {
-      font-size: 12px;
-      color: rgba(190, 225, 125, 0.6);
-      margin-bottom: 8px;
-      text-transform: uppercase;
-      letter-spacing: 0.1em;
-    }
-
-    .room-code-display {
-      display: flex;
-      gap: 10px;
-    }
-
-    .room-code {
-      flex: 1;
-      padding: 14px 18px;
-      background: rgba(0, 0, 0, 0.3);
-      border: 1px solid rgba(190, 225, 125, 0.2);
-      border-radius: 12px;
-      color: #bee17d;
-      font-family: 'Inter', monospace;
-      font-size: 20px;
-      font-weight: 500;
-      letter-spacing: 0.15em;
-      text-align: center;
-    }
-
-    .copy-btn {
-      padding: 14px 18px;
-      background: rgba(190, 225, 125, 0.15);
-      border: 1px solid rgba(190, 225, 125, 0.3);
-      border-radius: 12px;
-      color: #bee17d;
-      font-size: 16px;
-      cursor: pointer;
-      transition: all 0.2s ease;
-    }
-
-    .copy-btn:hover {
-      background: rgba(190, 225, 125, 0.25);
-    }
-
-    .divider {
-      display: flex;
-      align-items: center;
-      margin: 24px 0;
-      color: rgba(190, 225, 125, 0.4);
-      font-size: 12px;
-    }
-
-    .divider::before,
-    .divider::after {
-      content: '';
-      flex: 1;
-      height: 1px;
-      background: rgba(190, 225, 125, 0.2);
-    }
-
-    .divider span {
-      padding: 0 16px;
-    }
-
-    .join-section input {
-      width: 100%;
-      padding: 14px 18px;
-      background: rgba(0, 0, 0, 0.3);
-      border: 1px solid rgba(190, 225, 125, 0.2);
-      border-radius: 12px;
-      color: #bee17d;
-      font-family: 'Inter', sans-serif;
-      font-size: 16px;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-      margin-bottom: 12px;
-      text-align: center;
-    }
-
-    .join-section input::placeholder {
-      color: rgba(190, 225, 125, 0.3);
-      text-transform: none;
-      letter-spacing: normal;
-    }
-
-    .join-section input:focus {
-      outline: none;
-      border-color: rgba(190, 225, 125, 0.5);
-    }
-
-    .join-btn {
-      width: 100%;
-      padding: 14px;
-      background: rgba(190, 225, 125, 0.2);
-      border: 1px solid rgba(190, 225, 125, 0.4);
-      border-radius: 12px;
-      color: #bee17d;
-      font-family: 'Inter', sans-serif;
-      font-size: 14px;
-      font-weight: 500;
-      cursor: pointer;
-      transition: all 0.2s ease;
-    }
-
-    .join-btn:hover {
-      background: rgba(190, 225, 125, 0.3);
-    }
-
-    .connection-status {
-      margin-top: 16px;
-      padding: 12px;
-      background: rgba(0, 0, 0, 0.2);
-      border-radius: 8px;
-      font-size: 13px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .status-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: #666;
-    }
-
-    .status-dot.connected {
-      background: #4ade80;
-      box-shadow: 0 0 10px rgba(74, 222, 128, 0.5);
-    }
-
-    .status-dot.connecting {
-      background: #fbbf24;
-      animation: pulse 1s infinite;
-    }
-
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.5; }
-    }
-
-    /* Loading overlay */
-    #loading-overlay {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background: radial-gradient(ellipse at 50% 50%, #1a2a1a 0%, #0d120d 50%, #080a08 100%);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      z-index: 100;
-      transition: opacity 0.5s ease;
-    }
-
-    #loading-overlay.hidden {
-      opacity: 0;
-      pointer-events: none;
-    }
-
-    .loading-spinner {
-      width: 60px;
-      height: 60px;
-      border: 2px solid rgba(190, 225, 125, 0.2);
-      border-top-color: #bee17d;
-      border-radius: 50%;
-      animation: spin 1s linear infinite;
-    }
-
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
-
-    .loading-text {
-      color: #bee17d;
-      margin-top: 24px;
-      font-family: 'Cormorant Garamond', serif;
-      font-size: 20px;
-      font-style: italic;
-      letter-spacing: 0.05em;
-    }
-
-    /* Decorative elements */
-    .decorative-text {
-      position: absolute;
-      bottom: 80px;
-      left: 50%;
-      transform: translateX(-50%);
-      font-family: 'Cormorant Garamond', serif;
-      font-size: 72px;
-      font-style: italic;
-      color: rgba(190, 225, 125, 0.08);
-      white-space: nowrap;
-      pointer-events: none;
-      user-select: none;
-    }
-
-    /* ==================== RESPONSIVE STYLES ==================== */
-
-    /* Tablet */
-    @media (max-width: 1024px) {
-      .decorative-text {
-        font-size: 48px;
-        bottom: 60px;
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Air Canvas - Gesture Drawing</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;1,400;1,500&family=Inter:wght@300;400;500&display=swap"
+      rel="stylesheet" />
+    <!-- Preload MediaPipe models for faster hand tracking initialization -->
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" />
+    <link
+      rel="prefetch"
+      href="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.binarypb"
+      as="fetch"
+      crossorigin />
+    <link
+      rel="prefetch"
+      href="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands_solution_packed_assets_loader.js"
+      as="script"
+      crossorigin />
+    <link
+      rel="prefetch"
+      href="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands_solution_simd_wasm_bin.js"
+      as="script"
+      crossorigin />
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
       }
 
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        font-family: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+        background: #0a0f0a;
+      }
+
+      #app {
+        width: 100%;
+        height: 100%;
+        position: relative;
+        background: radial-gradient(
+          ellipse at 50% 50%,
+          #1a2a1a 0%,
+          #0d120d 50%,
+          #080a08 100%
+        );
+      }
+
+      /* Content wrapper with max-width */
+      .content-wrapper {
+        max-width: 1980px;
+        width: 100%;
+        height: 100%;
+        margin: 0 auto;
+        position: relative;
+      }
+
+      /* Video element for webcam - now visible in preview */
+      #webcam {
+        display: none;
+      }
+
+      /* Camera preview - draggable */
       #camera-preview {
-        width: 240px;
-        height: 180px;
+        position: absolute;
+        top: 24px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 320px;
+        height: 240px;
+        border-radius: 12px;
+        overflow: hidden;
+        border: 2px solid rgba(190, 225, 125, 0.3);
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+        z-index: 10;
+        background: #000;
+        cursor: grab;
+        user-select: none;
+      }
+
+      #camera-preview.dragging {
+        cursor: grabbing;
+        opacity: 0.9;
+        box-shadow: 0 8px 30px rgba(0, 0, 0, 0.7);
+        transition: none;
+      }
+
+      #camera-preview:not(.dragging) {
+        transition: box-shadow 0.2s ease, opacity 0.2s ease;
+      }
+
+      #camera-preview.custom-position {
+        transform: none;
       }
 
       #camera-preview.expanded {
-        width: 480px;
-        height: 360px;
+        width: 640px;
+        height: 480px;
       }
 
-      .title-text {
-        font-size: 28px;
+      #camera-preview video {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        transform: scaleX(-1);
       }
-    }
 
-    /* Mobile landscape and small tablets */
-    @media (max-width: 768px) {
+      #camera-preview canvas {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+      }
+
+      .preview-expand-btn {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        width: 28px;
+        height: 28px;
+        background: rgba(0, 0, 0, 0.6);
+        border: 1px solid rgba(190, 225, 125, 0.4);
+        border-radius: 6px;
+        color: #bee17d;
+        font-size: 14px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.2s ease;
+        z-index: 11;
+      }
+
+      .preview-expand-btn:hover {
+        background: rgba(190, 225, 125, 0.2);
+        border-color: rgba(190, 225, 125, 0.6);
+      }
+
+      #camera-preview.expanded .preview-expand-btn {
+        transform: rotate(180deg);
+      }
+
+      /* 3D scene layer */
+      #scene-canvas {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        z-index: 1;
+      }
+
+      /* Drawing canvas layer */
+      #draw-canvas {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        z-index: 2;
+        pointer-events: none;
+      }
+
+      /* Hand visualization layer */
+      #hand-canvas {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        z-index: 3;
+        pointer-events: none;
+      }
+
+      /* UI overlay */
+      #ui-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        z-index: 4;
+        pointer-events: none;
+      }
+
+      #ui-overlay > * {
+        pointer-events: auto;
+      }
+
+      /* Title section */
       .title-section {
-        top: 16px;
-        left: 16px;
+        position: absolute;
+        top: 24px;
+        left: 24px;
+        z-index: 11;
       }
 
       .title-text {
-        font-size: 24px;
+        color: #bee17d;
+        font-family: "Cormorant Garamond", serif;
+        font-size: 32px;
+        font-weight: 400;
+        font-style: normal;
+        letter-spacing: -0.01em;
+        margin-bottom: 4px;
       }
 
       .subtitle-text {
-        font-size: 11px;
+        color: rgba(190, 225, 125, 0.6);
+        font-family: "Inter", sans-serif;
+        font-size: 12px;
+        font-weight: 300;
+        letter-spacing: 0.05em;
       }
 
-      #camera-preview {
-        width: 160px;
-        height: 120px;
+      .subtitle-text a {
+        color: rgba(190, 225, 125, 0.8);
+        text-decoration: none;
+        transition: color 0.2s ease;
       }
 
-      #camera-preview:not(.custom-position) {
-        top: 16px;
-        left: 50%;
-        transform: translateX(-50%);
+      .subtitle-text a:hover {
+        color: #bee17d;
+        text-decoration: underline;
       }
 
-      #camera-preview.expanded {
-        width: 320px;
-        height: 240px;
-      }
-
+      /* Action buttons (top right) */
       .action-buttons {
-        top: 16px;
-        right: 16px;
-        gap: 8px;
+        position: absolute;
+        top: 24px;
+        right: 24px;
+        display: flex;
+        gap: 12px;
+        z-index: 11;
       }
 
       .action-btn {
-        padding: 8px 12px;
-        font-size: 12px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 16px;
+        background: rgba(20, 30, 20, 0.8);
+        border: 1px solid rgba(190, 225, 125, 0.3);
+        border-radius: 25px;
+        color: #bee17d;
+        font-family: "Inter", sans-serif;
+        font-size: 13px;
+        font-weight: 400;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        backdrop-filter: blur(10px);
       }
 
-      .action-btn .btn-text {
-        display: none;
+      .action-btn:hover {
+        background: rgba(190, 225, 125, 0.15);
+        border-color: rgba(190, 225, 125, 0.5);
+        transform: translateY(-2px);
+      }
+
+      .action-btn:active {
+        transform: translateY(0);
       }
 
       .action-btn .icon {
-        font-size: 18px;
+        font-size: 16px;
       }
 
+      /* Color palette */
       #color-palette {
-        right: 16px;
-        padding: 10px 8px;
-        gap: 8px;
+        position: absolute;
+        top: 50%;
+        right: 24px;
+        transform: translateY(-50%);
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        padding: 14px 10px;
+        background: rgba(20, 30, 20, 0.8);
+        border-radius: 30px;
+        border: 1px solid rgba(190, 225, 125, 0.2);
+        backdrop-filter: blur(10px);
       }
 
       .color-swatch {
-        width: 28px;
-        height: 28px;
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        cursor: pointer;
+        border: 2px solid transparent;
+        transition: all 0.2s ease;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
       }
 
+      .color-swatch:hover {
+        transform: scale(1.15);
+      }
+
+      .color-swatch.active {
+        border-color: #bee17d;
+        box-shadow: 0 0 15px rgba(190, 225, 125, 0.5);
+      }
+
+      /* Gesture hints */
       .gesture-hints {
-        bottom: 16px;
-        left: 16px;
-        gap: 6px;
+        position: absolute;
+        bottom: 24px;
+        left: 24px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        opacity: 0.8;
       }
 
       .gesture-hint {
-        font-size: 11px;
-        gap: 8px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        color: rgba(190, 225, 125, 0.8);
+        font-size: 12px;
+        font-weight: 300;
+        letter-spacing: 0.03em;
       }
 
       .gesture-icon {
-        width: 24px;
-        height: 24px;
+        width: 26px;
+        height: 26px;
+        background: rgba(190, 225, 125, 0.1);
+        border: 1px solid rgba(190, 225, 125, 0.3);
+        border-radius: 6px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 13px;
+      }
+
+      /* Status message */
+      #status-message {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        color: #bee17d;
+        font-family: "Cormorant Garamond", serif;
+        font-size: 28px;
+        font-style: italic;
+        text-align: center;
+        opacity: 0;
+        transition: opacity 0.3s ease;
+        text-shadow: 0 0 30px rgba(190, 225, 125, 0.3);
+      }
+
+      #status-message.visible {
+        opacity: 1;
+      }
+
+      /* Controls info */
+      .controls-info {
+        position: absolute;
+        bottom: 24px;
+        right: 24px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        text-align: right;
+        color: rgba(190, 225, 125, 0.5);
+        font-size: 11px;
+        font-weight: 300;
+        letter-spacing: 0.05em;
+      }
+
+      /* Invite Modal */
+      .modal-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.7);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 200;
+        opacity: 0;
+        visibility: hidden;
+        transition: all 0.3s ease;
+        backdrop-filter: blur(5px);
+      }
+
+      .modal-overlay.visible {
+        opacity: 1;
+        visibility: visible;
+      }
+
+      .modal {
+        background: linear-gradient(145deg, #1a2a1a 0%, #0d120d 100%);
+        border: 1px solid rgba(190, 225, 125, 0.3);
+        border-radius: 20px;
+        padding: 32px;
+        max-width: 400px;
+        width: 90%;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+        transform: scale(0.9);
+        transition: transform 0.3s ease;
+      }
+
+      .modal-overlay.visible .modal {
+        transform: scale(1);
+      }
+
+      .modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 24px;
+      }
+
+      .modal-title {
+        color: #bee17d;
+        font-family: "Cormorant Garamond", serif;
+        font-size: 28px;
+        font-weight: 400;
+      }
+
+      .modal-close {
+        width: 32px;
+        height: 32px;
+        border: none;
+        background: rgba(190, 225, 125, 0.1);
+        border-radius: 50%;
+        color: #bee17d;
+        font-size: 20px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .modal-close:hover {
+        background: rgba(190, 225, 125, 0.2);
+      }
+
+      .modal-body {
+        color: rgba(190, 225, 125, 0.8);
+        font-size: 14px;
+        line-height: 1.6;
+      }
+
+      .room-code-section {
+        margin: 20px 0;
+      }
+
+      .room-code-label {
+        font-size: 12px;
+        color: rgba(190, 225, 125, 0.6);
+        margin-bottom: 8px;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+      }
+
+      .room-code-display {
+        display: flex;
+        gap: 10px;
+      }
+
+      .room-code {
+        flex: 1;
+        padding: 14px 18px;
+        background: rgba(0, 0, 0, 0.3);
+        border: 1px solid rgba(190, 225, 125, 0.2);
+        border-radius: 12px;
+        color: #bee17d;
+        font-family: "Inter", monospace;
+        font-size: 20px;
+        font-weight: 500;
+        letter-spacing: 0.15em;
+        text-align: center;
+      }
+
+      .copy-btn {
+        padding: 14px 18px;
+        background: rgba(190, 225, 125, 0.15);
+        border: 1px solid rgba(190, 225, 125, 0.3);
+        border-radius: 12px;
+        color: #bee17d;
+        font-size: 16px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+      }
+
+      .copy-btn:hover {
+        background: rgba(190, 225, 125, 0.25);
+      }
+
+      .divider {
+        display: flex;
+        align-items: center;
+        margin: 24px 0;
+        color: rgba(190, 225, 125, 0.4);
         font-size: 12px;
       }
 
-      .controls-info {
-        display: none;
+      .divider::before,
+      .divider::after {
+        content: "";
+        flex: 1;
+        height: 1px;
+        background: rgba(190, 225, 125, 0.2);
       }
 
-      .decorative-text {
-        display: none;
+      .divider span {
+        padding: 0 16px;
       }
 
-      #status-message {
-        font-size: 22px;
-        padding: 0 20px;
-      }
-
-      .modal {
-        padding: 24px;
-        margin: 16px;
-      }
-
-      .modal-title {
-        font-size: 24px;
-      }
-
-      .room-code {
-        font-size: 18px;
-        padding: 12px 14px;
-      }
-    }
-
-    /* Mobile portrait */
-    @media (max-width: 480px) {
-      .title-section {
-        top: 12px;
-        left: 12px;
-      }
-
-      .title-text {
-        font-size: 20px;
-      }
-
-      .subtitle-text {
-        font-size: 10px;
-      }
-
-      #camera-preview {
-        width: 120px;
-        height: 90px;
-        border-radius: 8px;
-      }
-
-      #camera-preview:not(.custom-position) {
-        top: 12px;
-        left: 50%;
-        transform: translateX(-50%);
-      }
-
-      .action-buttons {
-        top: 12px;
-        right: 12px;
-        gap: 6px;
-      }
-
-      .action-btn {
-        padding: 8px 10px;
-        border-radius: 20px;
-      }
-
-      #color-palette {
-        right: 12px;
-        padding: 8px 6px;
-        gap: 6px;
-        border-radius: 24px;
-      }
-
-      .color-swatch {
-        width: 24px;
-        height: 24px;
-      }
-
-      .gesture-hints {
-        bottom: 12px;
-        left: 12px;
-      }
-
-      .gesture-hint span {
-        display: none;
-      }
-
-      .gesture-icon {
-        width: 32px;
-        height: 32px;
+      .join-section input {
+        width: 100%;
+        padding: 14px 18px;
+        background: rgba(0, 0, 0, 0.3);
+        border: 1px solid rgba(190, 225, 125, 0.2);
+        border-radius: 12px;
+        color: #bee17d;
+        font-family: "Inter", sans-serif;
         font-size: 16px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        margin-bottom: 12px;
+        text-align: center;
       }
 
-      .gesture-hints {
-        flex-direction: row;
+      .join-section input::placeholder {
+        color: rgba(190, 225, 125, 0.3);
+        text-transform: none;
+        letter-spacing: normal;
+      }
+
+      .join-section input:focus {
+        outline: none;
+        border-color: rgba(190, 225, 125, 0.5);
+      }
+
+      .join-btn {
+        width: 100%;
+        padding: 14px;
+        background: rgba(190, 225, 125, 0.2);
+        border: 1px solid rgba(190, 225, 125, 0.4);
+        border-radius: 12px;
+        color: #bee17d;
+        font-family: "Inter", sans-serif;
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.2s ease;
+      }
+
+      .join-btn:hover {
+        background: rgba(190, 225, 125, 0.3);
+      }
+
+      .connection-status {
+        margin-top: 16px;
+        padding: 12px;
+        background: rgba(0, 0, 0, 0.2);
+        border-radius: 8px;
+        font-size: 13px;
+        display: flex;
+        align-items: center;
         gap: 8px;
       }
 
-      #status-message {
-        font-size: 18px;
+      .status-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #666;
       }
 
-      .modal {
-        padding: 20px;
-        border-radius: 16px;
+      .status-dot.connected {
+        background: #4ade80;
+        box-shadow: 0 0 10px rgba(74, 222, 128, 0.5);
       }
 
-      .modal-title {
-        font-size: 22px;
+      .status-dot.connecting {
+        background: #fbbf24;
+        animation: pulse 1s infinite;
       }
 
-      .room-code {
-        font-size: 16px;
-        padding: 10px 12px;
-      }
-    }
-
-    /* Very small screens */
-    @media (max-width: 360px) {
-      #camera-preview {
-        width: 100px;
-        height: 75px;
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.5;
+        }
       }
 
-      .color-swatch {
-        width: 22px;
-        height: 22px;
+      /* Loading overlay */
+      #loading-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: radial-gradient(
+          ellipse at 50% 50%,
+          #1a2a1a 0%,
+          #0d120d 50%,
+          #080a08 100%
+        );
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        z-index: 100;
+        transition: opacity 0.5s ease;
       }
 
-      #color-palette {
-        gap: 5px;
-        padding: 6px 5px;
-      }
-    }
-
-    /* Landscape mobile */
-    @media (max-height: 500px) and (orientation: landscape) {
-      #camera-preview {
-        width: 140px;
-        height: 105px;
+      #loading-overlay.hidden {
+        opacity: 0;
+        pointer-events: none;
       }
 
-      #camera-preview:not(.custom-position) {
-        top: 12px;
+      .loading-spinner {
+        width: 60px;
+        height: 60px;
+        border: 2px solid rgba(190, 225, 125, 0.2);
+        border-top-color: #bee17d;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      .loading-text {
+        color: #bee17d;
+        margin-top: 24px;
+        font-family: "Cormorant Garamond", serif;
+        font-size: 20px;
+        font-style: italic;
+        letter-spacing: 0.05em;
+      }
+
+      /* Decorative elements */
+      .decorative-text {
+        position: absolute;
+        bottom: 80px;
         left: 50%;
         transform: translateX(-50%);
+        font-family: "Cormorant Garamond", serif;
+        font-size: 72px;
+        font-style: italic;
+        color: rgba(190, 225, 125, 0.08);
+        white-space: nowrap;
+        pointer-events: none;
+        user-select: none;
       }
 
-      .title-section {
-        top: 12px;
+      /* ==================== RESPONSIVE STYLES ==================== */
+
+      /* Tablet */
+      @media (max-width: 1024px) {
+        .decorative-text {
+          font-size: 48px;
+          bottom: 60px;
+        }
+
+        #camera-preview {
+          width: 240px;
+          height: 180px;
+        }
+
+        #camera-preview.expanded {
+          width: 480px;
+          height: 360px;
+        }
+
+        .title-text {
+          font-size: 28px;
+        }
       }
 
-      .title-text {
-        font-size: 22px;
+      /* Mobile landscape and small tablets */
+      @media (max-width: 768px) {
+        .title-section {
+          top: 16px;
+          left: 16px;
+        }
+
+        .title-text {
+          font-size: 24px;
+        }
+
+        .subtitle-text {
+          font-size: 11px;
+        }
+
+        #camera-preview {
+          width: 160px;
+          height: 120px;
+        }
+
+        #camera-preview:not(.custom-position) {
+          top: 16px;
+          left: 50%;
+          transform: translateX(-50%);
+        }
+
+        #camera-preview.expanded {
+          width: 320px;
+          height: 240px;
+        }
+
+        .action-buttons {
+          top: 16px;
+          right: 16px;
+          gap: 8px;
+        }
+
+        .action-btn {
+          padding: 8px 12px;
+          font-size: 12px;
+        }
+
+        .action-btn .btn-text {
+          display: none;
+        }
+
+        .action-btn .icon {
+          font-size: 18px;
+        }
+
+        #color-palette {
+          right: 16px;
+          padding: 10px 8px;
+          gap: 8px;
+        }
+
+        .color-swatch {
+          width: 28px;
+          height: 28px;
+        }
+
+        .gesture-hints {
+          bottom: 16px;
+          left: 16px;
+          gap: 6px;
+        }
+
+        .gesture-hint {
+          font-size: 11px;
+          gap: 8px;
+        }
+
+        .gesture-icon {
+          width: 24px;
+          height: 24px;
+          font-size: 12px;
+        }
+
+        .controls-info {
+          display: none;
+        }
+
+        .decorative-text {
+          display: none;
+        }
+
+        #status-message {
+          font-size: 22px;
+          padding: 0 20px;
+        }
+
+        .modal {
+          padding: 24px;
+          margin: 16px;
+        }
+
+        .modal-title {
+          font-size: 24px;
+        }
+
+        .room-code {
+          font-size: 18px;
+          padding: 12px 14px;
+        }
       }
 
-      #color-palette {
-        flex-direction: row;
-        top: auto;
-        bottom: 16px;
-        right: 50%;
-        transform: translateX(50%);
-        padding: 8px 12px;
-        border-radius: 20px;
+      /* Mobile portrait */
+      @media (max-width: 480px) {
+        .title-section {
+          top: 12px;
+          left: 12px;
+        }
+
+        .title-text {
+          font-size: 20px;
+        }
+
+        .subtitle-text {
+          font-size: 10px;
+        }
+
+        #camera-preview {
+          width: 120px;
+          height: 90px;
+          border-radius: 8px;
+        }
+
+        #camera-preview:not(.custom-position) {
+          top: 12px;
+          left: 50%;
+          transform: translateX(-50%);
+        }
+
+        .action-buttons {
+          top: 12px;
+          right: 12px;
+          gap: 6px;
+        }
+
+        .action-btn {
+          padding: 8px 10px;
+          border-radius: 20px;
+        }
+
+        #color-palette {
+          right: 12px;
+          padding: 8px 6px;
+          gap: 6px;
+          border-radius: 24px;
+        }
+
+        .color-swatch {
+          width: 24px;
+          height: 24px;
+        }
+
+        .gesture-hints {
+          bottom: 12px;
+          left: 12px;
+        }
+
+        .gesture-hint span {
+          display: none;
+        }
+
+        .gesture-icon {
+          width: 32px;
+          height: 32px;
+          font-size: 16px;
+        }
+
+        .gesture-hints {
+          flex-direction: row;
+          gap: 8px;
+        }
+
+        #status-message {
+          font-size: 18px;
+        }
+
+        .modal {
+          padding: 20px;
+          border-radius: 16px;
+        }
+
+        .modal-title {
+          font-size: 22px;
+        }
+
+        .room-code {
+          font-size: 16px;
+          padding: 10px 12px;
+        }
       }
 
-      .gesture-hints {
-        flex-direction: row;
-        bottom: 60px;
+      /* Very small screens */
+      @media (max-width: 360px) {
+        #camera-preview {
+          width: 100px;
+          height: 75px;
+        }
+
+        .color-swatch {
+          width: 22px;
+          height: 22px;
+        }
+
+        #color-palette {
+          gap: 5px;
+          padding: 6px 5px;
+        }
       }
 
-      .gesture-hint span {
-        display: none;
+      /* Landscape mobile */
+      @media (max-height: 500px) and (orientation: landscape) {
+        #camera-preview {
+          width: 140px;
+          height: 105px;
+        }
+
+        #camera-preview:not(.custom-position) {
+          top: 12px;
+          left: 50%;
+          transform: translateX(-50%);
+        }
+
+        .title-section {
+          top: 12px;
+        }
+
+        .title-text {
+          font-size: 22px;
+        }
+
+        #color-palette {
+          flex-direction: row;
+          top: auto;
+          bottom: 16px;
+          right: 50%;
+          transform: translateX(50%);
+          padding: 8px 12px;
+          border-radius: 20px;
+        }
+
+        .gesture-hints {
+          flex-direction: row;
+          bottom: 60px;
+        }
+
+        .gesture-hint span {
+          display: none;
+        }
+
+        .controls-info {
+          display: none;
+        }
       }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div class="content-wrapper">
+        <video id="webcam" playsinline></video>
+        <canvas id="scene-canvas"></canvas>
+        <canvas id="draw-canvas"></canvas>
+        <canvas id="hand-canvas"></canvas>
 
-      .controls-info {
-        display: none;
-      }
-    }
-  </style>
-</head>
-<body>
-  <div id="app">
-    <div class="content-wrapper">
-      <video id="webcam" playsinline></video>
-      <canvas id="scene-canvas"></canvas>
-      <canvas id="draw-canvas"></canvas>
-      <canvas id="hand-canvas"></canvas>
-
-      <!-- Camera preview with hand tracking overlay -->
-      <div id="camera-preview">
-        <video id="preview-video" playsinline muted></video>
-        <canvas id="preview-canvas"></canvas>
-        <button class="preview-expand-btn" id="preview-expand-btn" title="Expand preview">⤢</button>
-      </div>
-
-      <div id="ui-overlay">
-      <div class="title-section">
-        <div class="title-text">Air Canvas</div>
-        <div class="subtitle-text">Designed by <a href="https://www.instagram.com/janustiu/" target="_blank" rel="noopener noreferrer">Janus Tiu</a></div>
-      </div>
-
-      <!-- Action buttons -->
-      <div class="action-buttons">
-        <button class="action-btn" id="clear-all-btn">
-          <span class="icon">🗑️</span>
-          <span class="btn-text">Clear All</span>
-        </button>
-        <button class="action-btn" id="invite-btn">
-          <span class="icon">👥</span>
-          <span class="btn-text">Invite Friend</span>
-        </button>
-      </div>
-
-      <!-- Color palette -->
-      <div id="color-palette">
-        <div class="color-swatch active" data-color="#FFB3BA" style="background: #FFB3BA;"></div>
-        <div class="color-swatch" data-color="#FFFFBA" style="background: #FFFFBA;"></div>
-        <div class="color-swatch" data-color="#BAFFC9" style="background: #BAFFC9;"></div>
-        <div class="color-swatch" data-color="#BAE1FF" style="background: #BAE1FF;"></div>
-        <div class="color-swatch" data-color="#E8BAFF" style="background: #E8BAFF;"></div>
-        <div class="color-swatch" data-color="#FFD4A3" style="background: #FFD4A3;"></div>
-        <div class="color-swatch" data-color="#A3FFD4" style="background: #A3FFD4;"></div>
-        <div class="color-swatch" data-color="#D4A3FF" style="background: #D4A3FF;"></div>
-        <div class="color-swatch" data-color="#FFFFFF" style="background: #FFFFFF;"></div>
-        <div class="color-swatch" data-color="#bee17d" style="background: #bee17d;"></div>
-      </div>
-
-      <div class="gesture-hints">
-        <div class="gesture-hint">
-          <div class="gesture-icon">☝️</div>
-          <span>Point to draw</span>
+        <!-- Camera preview with hand tracking overlay -->
+        <div id="camera-preview">
+          <video id="preview-video" playsinline muted></video>
+          <canvas id="preview-canvas"></canvas>
+          <button
+            class="preview-expand-btn"
+            id="preview-expand-btn"
+            title="Expand preview">
+            ⤢
+          </button>
         </div>
-        <div class="gesture-hint">
-          <div class="gesture-icon">🤏</div>
-          <span>Pinch to grab</span>
-        </div>
-        <div class="gesture-hint">
-          <div class="gesture-icon">🖐️</div>
-          <span>Palm to inflate</span>
-        </div>
-      </div>
 
-      <div class="controls-info">
-        <span>SCROLL to zoom</span>
-        <span>DRAG to orbit</span>
-        <span>CLICK object to select</span>
-      </div>
-
-      <div id="status-message"></div>
-
-      <div class="decorative-text">create with your hands</div>
-    </div>
-    </div>
-
-    <!-- Invite Modal -->
-    <div class="modal-overlay" id="invite-modal">
-      <div class="modal">
-        <div class="modal-header">
-          <h2 class="modal-title">Invite Friend</h2>
-          <button class="modal-close" id="modal-close">&times;</button>
-        </div>
-        <div class="modal-body">
-          <p>Share this room code with a friend to draw together in real-time!</p>
-
-          <div class="room-code-section">
-            <div class="room-code-label">Your Room Code</div>
-            <div class="room-code-display">
-              <div class="room-code" id="room-code">------</div>
-              <button class="copy-btn" id="copy-code-btn" title="Copy to clipboard">📋</button>
+        <div id="ui-overlay">
+          <div class="title-section">
+            <div class="title-text">Air Canvas</div>
+            <div class="subtitle-text">
+              Designed by
+              <a
+                href="https://www.instagram.com/sadrita_neogi/"
+                target="_blank"
+                rel="noopener noreferrer"
+                >Sadrita Neogi</a
+              >
             </div>
           </div>
 
-          <div class="divider"><span>or join a friend</span></div>
-
-          <div class="join-section">
-            <input type="text" id="join-code-input" placeholder="Enter room code" maxlength="6">
-            <button class="join-btn" id="join-room-btn">Join Room</button>
+          <!-- Action buttons -->
+          <div class="action-buttons">
+            <button class="action-btn" id="clear-all-btn">
+              <span class="icon">🗑️</span>
+              <span class="btn-text">Clear All</span>
+            </button>
+            <button class="action-btn" id="invite-btn">
+              <span class="icon">👥</span>
+              <span class="btn-text">Invite Friend</span>
+            </button>
           </div>
 
-          <div class="connection-status" id="connection-status">
-            <span class="status-dot" id="status-dot"></span>
-            <span id="status-text">Not connected</span>
+          <!-- Color palette -->
+          <div id="color-palette">
+            <div
+              class="color-swatch active"
+              data-color="#FFB3BA"
+              style="background: #ffb3ba"></div>
+            <div
+              class="color-swatch"
+              data-color="#FFFFBA"
+              style="background: #ffffba"></div>
+            <div
+              class="color-swatch"
+              data-color="#BAFFC9"
+              style="background: #baffc9"></div>
+            <div
+              class="color-swatch"
+              data-color="#BAE1FF"
+              style="background: #bae1ff"></div>
+            <div
+              class="color-swatch"
+              data-color="#E8BAFF"
+              style="background: #e8baff"></div>
+            <div
+              class="color-swatch"
+              data-color="#FFD4A3"
+              style="background: #ffd4a3"></div>
+            <div
+              class="color-swatch"
+              data-color="#A3FFD4"
+              style="background: #a3ffd4"></div>
+            <div
+              class="color-swatch"
+              data-color="#D4A3FF"
+              style="background: #d4a3ff"></div>
+            <div
+              class="color-swatch"
+              data-color="#FFFFFF"
+              style="background: #ffffff"></div>
+            <div
+              class="color-swatch"
+              data-color="#bee17d"
+              style="background: #bee17d"></div>
+          </div>
+
+          <div class="gesture-hints">
+            <div class="gesture-hint">
+              <div class="gesture-icon">☝️</div>
+              <span>Point to draw</span>
+            </div>
+            <div class="gesture-hint">
+              <div class="gesture-icon">🤏</div>
+              <span>Pinch to grab</span>
+            </div>
+            <div class="gesture-hint">
+              <div class="gesture-icon">🖐️</div>
+              <span>Palm to inflate</span>
+            </div>
+          </div>
+
+          <div class="controls-info">
+            <span>SCROLL to zoom</span>
+            <span>DRAG to orbit</span>
+            <span>CLICK object to select</span>
+          </div>
+
+          <div id="status-message"></div>
+
+          <div class="decorative-text">create with your hands</div>
+        </div>
+      </div>
+
+      <!-- Invite Modal -->
+      <div class="modal-overlay" id="invite-modal">
+        <div class="modal">
+          <div class="modal-header">
+            <h2 class="modal-title">Invite Friend</h2>
+            <button class="modal-close" id="modal-close">&times;</button>
+          </div>
+          <div class="modal-body">
+            <p>
+              Share this room code with a friend to draw together in real-time!
+            </p>
+
+            <div class="room-code-section">
+              <div class="room-code-label">Your Room Code</div>
+              <div class="room-code-display">
+                <div class="room-code" id="room-code">------</div>
+                <button
+                  class="copy-btn"
+                  id="copy-code-btn"
+                  title="Copy to clipboard">
+                  📋
+                </button>
+              </div>
+            </div>
+
+            <div class="divider"><span>or join a friend</span></div>
+
+            <div class="join-section">
+              <input
+                type="text"
+                id="join-code-input"
+                placeholder="Enter room code"
+                maxlength="6" />
+              <button class="join-btn" id="join-room-btn">Join Room</button>
+            </div>
+
+            <div class="connection-status" id="connection-status">
+              <span class="status-dot" id="status-dot"></span>
+              <span id="status-text">Not connected</span>
+            </div>
           </div>
         </div>
       </div>
+
+      <div id="loading-overlay">
+        <div class="loading-spinner"></div>
+        <div class="loading-text">Initializing hand tracking...</div>
+      </div>
     </div>
 
-    <div id="loading-overlay">
-      <div class="loading-spinner"></div>
-      <div class="loading-text">Initializing hand tracking...</div>
-    </div>
-  </div>
-
-  <script type="module" src="/src/main.ts"></script>
-</body>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
 </html>

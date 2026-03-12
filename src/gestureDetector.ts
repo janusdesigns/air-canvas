@@ -62,9 +62,9 @@ export class GestureDetector {
       y: (currentPalm.y - lastPalm.y) / dt
     };
 
-    // Smooth velocity with minimal history for faster response
+    // Minimal velocity smoothing for faster response - use only current frame
     this.velocityHistory.push(velocity);
-    if (this.velocityHistory.length > 2) {
+    if (this.velocityHistory.length > 1) {  // Reduced from 2 to 1
       this.velocityHistory.shift();
     }
 
@@ -93,7 +93,12 @@ export class GestureDetector {
   private detectGestureType(landmarks: HandLandmarks, velocity: Point2D): GestureType {
     const lm = landmarks.landmarks;
 
-    // Check for swipe first (fast horizontal movement)
+    // Check for draw mode FIRST (index finger extended) - prioritized for instant responsiveness
+    if (this.isPointingIndex(landmarks)) {
+      return 'draw';
+    }
+
+    // Check for swipe (fast horizontal movement)
     const speed = Math.sqrt(velocity.x * velocity.x + velocity.y * velocity.y);
     if (speed > GESTURE.SWIPE_VELOCITY && Math.abs(velocity.x) > Math.abs(velocity.y) * 1.5) {
       return 'swipe';
@@ -126,11 +131,6 @@ export class GestureDetector {
       }
     } else {
       this.palmHistory = [];
-    }
-
-    // Check for draw mode (index finger extended) - check this early for responsiveness
-    if (this.isPointingIndex(landmarks)) {
-      return 'draw';
     }
 
     return 'none';
@@ -169,6 +169,8 @@ export class GestureDetector {
   }
 
   private isPointingIndex(landmarks: HandLandmarks): boolean {
+    // Simplified check: just make sure index is extended
+    // This is much faster and more responsive than checking all fingers
     const indexExtended = this.isFingerExtended(
       landmarks,
       LANDMARKS.INDEX_TIP,
@@ -176,31 +178,21 @@ export class GestureDetector {
       LANDMARKS.INDEX_MCP
     );
 
-    const middleCurled = !this.isFingerExtended(
+    // Check if middle finger is NOT strongly extended (loose check)
+    const middleNotStronglyExtended = !this.isFingerExtended(
       landmarks,
       LANDMARKS.MIDDLE_TIP,
       LANDMARKS.MIDDLE_PIP,
       LANDMARKS.MIDDLE_MCP
     );
 
-    const ringCurled = !this.isFingerExtended(
-      landmarks,
-      LANDMARKS.RING_TIP,
-      LANDMARKS.RING_PIP,
-      LANDMARKS.RING_MCP
-    );
-
-    const pinkyCurled = !this.isFingerExtended(
-      landmarks,
-      LANDMARKS.PINKY_TIP,
-      LANDMARKS.PINKY_PIP,
-      LANDMARKS.PINKY_MCP
-    );
-
-    return indexExtended && middleCurled && ringCurled && pinkyCurled;
+    // Only require index extended + middle not extended
+    // This makes gesture detection MUCH faster
+    return indexExtended && middleNotStronglyExtended;
   }
 
   private isOpenPalm(landmarks: HandLandmarks): boolean {
+    // Simplified check: just check if fingers are mostly extended
     const indexExtended = this.isFingerExtended(
       landmarks,
       LANDMARKS.INDEX_TIP,
@@ -215,23 +207,9 @@ export class GestureDetector {
       LANDMARKS.MIDDLE_MCP
     );
 
-    const ringExtended = this.isFingerExtended(
-      landmarks,
-      LANDMARKS.RING_TIP,
-      LANDMARKS.RING_PIP,
-      LANDMARKS.RING_MCP
-    );
-
-    const pinkyExtended = this.isFingerExtended(
-      landmarks,
-      LANDMARKS.PINKY_TIP,
-      LANDMARKS.PINKY_PIP,
-      LANDMARKS.PINKY_MCP
-    );
-
-    const thumbExtended = this.isThumbExtended(landmarks);
-
-    return indexExtended && middleExtended && ringExtended && pinkyExtended && thumbExtended;
+    // Only need index and middle extended for fast palm detection
+    // This is much faster than checking all fingers
+    return indexExtended && middleExtended;
   }
 
   private isFist(landmarks: HandLandmarks): boolean {
@@ -269,9 +247,9 @@ export class GestureDetector {
   }
 
   private isPalmStable(): boolean {
-    if (this.palmHistory.length < 3) return false;
+    if (this.palmHistory.length < 2) return false;  // Reduced from 3 to 2 for faster response
 
-    const recent = this.palmHistory.slice(-3);
+    const recent = this.palmHistory.slice(-2);  // Reduced from 3 to 2
     const first = recent[0];
 
     for (const point of recent) {

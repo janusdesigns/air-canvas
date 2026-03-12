@@ -119,7 +119,7 @@ Found a bug? Have an idea? I'd love to hear from you!
 
 ## Credits
 
-Designed by [Janus Tiu](https://www.instagram.com/janustiu/)
+Designed by [Sadrita Neogi](https://www.instagram.com/sadrita_neogi/)
 
 ### Open Source Libraries
 
@@ -139,3 +139,6 @@ Thank you to all the maintainers and contributors of these projects!
 ## License
 
 MIT
+# Air---Canvas
+# Air---Canvas
+# Air-Canvas-Web
